@@ -12,6 +12,7 @@ import { highlight } from "./highlight.js";
 import { indentGuides } from "./indent-guides.js";
 import { prepareLanguage } from "./syntax-parser.js";
 import { tokenize } from "./tokenizer.js";
+import { editorOptionsFromParams } from "./editor-options.js";
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
@@ -217,6 +218,7 @@ const consentVersion = globalThis.CODETRIAL_CONSENT_VERSION || "";
 const replayVersion = globalThis.CODETRIAL_REPLAY_VERSION || 1;
 
 const params = new URLSearchParams(window.location.search);
+const editorOptions = editorOptionsFromParams(params);
 // Start this independent request while the problem data is loading. It has to
 // settle rather than reject: nothing awaits it until init() reaches the sign-in
 // gate, and a problem that fails to load throws out of the top-level await
@@ -576,6 +578,10 @@ async function init() {
   state.transcript = createTranscriptView(document, nodes.transcriptPanel);
   renderRuntimeConfig();
   nodes.hideExamples.checked = readStored(HIDE_EXAMPLES_KEY) === "1";
+  nodes.editorHighlight.hidden = !editorOptions.highlight;
+  nodes.editorStack.classList.toggle("plain-text", !editorOptions.highlight);
+  if (!editorOptions.monospace)
+    nodes.editorStack.style.setProperty("--editor-font-family", "inherit");
   applyEditorFontSize(readStored(EDITOR_FONT_SIZE_KEY));
   applyEditorTheme(readStored(EDITOR_THEME_KEY));
   renderProblem();
@@ -860,6 +866,7 @@ function bindEvents() {
     if (applyingProgrammaticEdit || event.isComposing || !event.cancelable)
       return;
     if (event.inputType === "insertLineBreak") {
+      if (!editorOptions.autoIndent) return;
       event.preventDefault();
       applyEditorEdit(
         indentNewline(
@@ -871,6 +878,7 @@ function bindEvents() {
       );
       return;
     }
+    if (!editorOptions.autoClose) return;
     if (isBracketOpenerKeystroke(event)) {
       const pair = insertBracketPair(
         nodes.editor.value,
@@ -1992,15 +2000,18 @@ function applyLanguages(spec) {
 function setLanguage(language) {
   if (state.phase === "report_recovery" || state.phase === "report") return;
   if (!languages.includes(language)) return;
-  void prepareLanguage(language)
-    .then(() => {
-      if (state.language !== language) return;
-      // Replace fallback ranges when the grammar finishes loading.
-      editorTokenCache = null;
-      paintedEditor = null;
-      paintEditor();
-    })
-    .catch(() => {});
+  // Indentation and syntax highlighting share parsed regions.
+  if (editorOptions.autoIndent || editorOptions.highlight) {
+    void prepareLanguage(language)
+      .then(() => {
+        if (state.language !== language) return;
+        // Replace fallback ranges when the grammar finishes loading.
+        editorTokenCache = null;
+        paintedEditor = null;
+        paintEditor();
+      })
+      .catch(() => {});
+  }
   if (editorInitialized) {
     // A switch is a coalescer boundary. Flush the old tab before selecting the
     // new one so a quick click cannot replace an unreported edit with the new
@@ -3301,15 +3312,16 @@ function paintEditor(showMatch = document.activeElement === nodes.editor) {
     editorPaintFrame = null;
   }
   const code = currentCode();
-  const brackets = showMatch
-    ? matchingBrackets(
-        code,
-        nodes.editor.selectionStart,
-        nodes.editor.selectionEnd,
-        state.language,
-        editorTokens,
-      )
-    : null;
+  const brackets =
+    editorOptions.highlight && showMatch
+      ? matchingBrackets(
+          code,
+          nodes.editor.selectionStart,
+          nodes.editor.selectionEnd,
+          state.language,
+          editorTokens,
+        )
+      : null;
   if (
     paintedEditor?.code === code &&
     paintedEditor.language === state.language &&
@@ -3318,17 +3330,19 @@ function paintEditor(showMatch = document.activeElement === nodes.editor) {
   )
     return;
   paintedEditor = { code, language: state.language, brackets };
-  const classified = editorTokens(code, state.language);
-  // Kept with the tokens they are measured from, so a caret move that only
-  // shifts the bracket match reuses the guides instead of measuring again.
-  classified.guides ??= indentGuides(code, classified.tokens);
-  nodes.editorHighlight.firstElementChild.innerHTML = highlight(
-    code,
-    state.language,
-    brackets,
-    classified.tokens,
-    classified.guides,
-  );
+  if (editorOptions.highlight) {
+    const classified = editorTokens(code, state.language);
+    // Kept with the tokens they are measured from, so a caret move that only
+    // shifts the bracket match reuses the guides instead of measuring again.
+    classified.guides ??= indentGuides(code, classified.tokens);
+    nodes.editorHighlight.firstElementChild.innerHTML = highlight(
+      code,
+      state.language,
+      brackets,
+      classified.tokens,
+      classified.guides,
+    );
+  }
   const lines = code.split("\n").length;
   if (lines !== paintedLineCount) {
     paintedLineCount = lines;

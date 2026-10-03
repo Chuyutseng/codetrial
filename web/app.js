@@ -30,6 +30,11 @@ import {
   selectedGroundingPacket,
   storeGroundingPacket,
 } from "./document-grounding.js";
+import {
+  loadEditorOptions,
+  saveEditorOptions,
+  setEditorOptions,
+} from "./editor-options.js";
 
 const requestTimeoutMs = 10_000;
 
@@ -81,6 +86,7 @@ let roll = Math.random();
 let avoidedProblem;
 
 const nodes = {
+  editorOptions: document.querySelector(".editor-options-row"),
   accountStatus: document.querySelector("#account-status"),
   githubLogin: document.querySelector("#github-login"),
   loginLink: document.querySelector("#login-link"),
@@ -213,6 +219,20 @@ async function loadTopics() {
 nodes.problemPicker.addEventListener("toggle", () => {
   if (nodes.problemPicker.open) void loadTopics();
 });
+const editorControls = [...document.querySelectorAll('[name="editor-option"]')];
+const savedEditorOptions = loadEditorOptions();
+for (const input of editorControls) {
+  input.checked = savedEditorOptions[input.value];
+  input.addEventListener("change", () =>
+    saveEditorOptions(selectedEditorOptions()),
+  );
+}
+
+function selectedEditorOptions() {
+  return Object.fromEntries(
+    editorControls.map((input) => [input.value, input.checked]),
+  );
+}
 
 // A picked card is a choice about this one interview, not about the filter the
 // checkboxes carry, so it leaves them alone. It suggests a length to go with
@@ -332,6 +352,7 @@ for (const button of document.querySelectorAll("[data-mode]")) {
     if (starting) return;
     mode = interviewMode(button.dataset.mode);
     select("[data-mode]", button);
+    nodes.editorOptions.disabled = mode === "whiteboard";
     // Said once, here, because every other difference the candidate will meet
     // follows from it: no editor, no test runner, and a board the interviewer
     // is sent as they draw.
@@ -374,6 +395,7 @@ start.addEventListener("click", async () => {
   destination.searchParams.set("duration", String(duration));
   destination.searchParams.set("loop", interviewLoop);
   destination.searchParams.set("mode", mode);
+  setEditorOptions(destination.searchParams, selectedEditorOptions());
   const profile = {
     role: nodes.profileRole.value.trim(),
     seniority: nodes.profileSeniority.value,
