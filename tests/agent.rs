@@ -13,16 +13,20 @@ mod words;
 use words::shared_run;
 
 /// The defaults src/runtime.rs supplies at the one production call site, so a
-/// test that cares about a single argument does not spell out the other five.
+/// test that cares about a single argument does not spell out the other
+/// defaults.
 fn instructions(problem: &Problem, duration_min: u32) -> String {
     build_instructions_for_plan(
         problem,
         duration_min,
-        &InterviewProfile::default(),
-        &InterviewGrounding::default(),
-        InterviewLoop::CodingBehavioral,
-        false,
-        InterviewMode::Coding,
+        &codetrial::runtime::RuntimeOptions {
+            profile: InterviewProfile::default(),
+            grounding: InterviewGrounding::default(),
+            interview_loop: InterviewLoop::CodingBehavioral,
+            examples_hidden: false,
+            interview_mode: InterviewMode::Coding,
+            code_execution_disabled: false,
+        },
     )
 }
 
@@ -31,11 +35,14 @@ fn board_instructions(problem: &Problem, duration_min: u32) -> String {
     build_instructions_for_plan(
         problem,
         duration_min,
-        &InterviewProfile::default(),
-        &InterviewGrounding::default(),
-        InterviewLoop::CodingBehavioral,
-        false,
-        InterviewMode::Whiteboard,
+        &codetrial::runtime::RuntimeOptions {
+            profile: InterviewProfile::default(),
+            grounding: InterviewGrounding::default(),
+            interview_loop: InterviewLoop::CodingBehavioral,
+            examples_hidden: false,
+            interview_mode: InterviewMode::Whiteboard,
+            code_execution_disabled: false,
+        },
     )
 }
 
@@ -285,23 +292,27 @@ fn prompt_samples() -> Value {
         }),
         "timeBehavioral": behavioral_time_warning(),
         "instructions": instructions(problem, 45),
-        "instructionsProfile": build_instructions_for_plan(
-            problem,
+        "instructionsProfile": build_instructions_for_plan(problem,
             45,
-            &full_profile,
-            &InterviewGrounding::default(),
-            InterviewLoop::CodingBehavioral,
-            false,
-            InterviewMode::Coding,
+            &codetrial::runtime::RuntimeOptions {
+                profile: full_profile.clone(),
+                grounding: InterviewGrounding::default(),
+                interview_loop: InterviewLoop::CodingBehavioral,
+                examples_hidden: false,
+                interview_mode: InterviewMode::Coding,
+                code_execution_disabled: false,
+            },
         ),
-        "instructionsExamplesHidden": build_instructions_for_plan(
-            problem,
+        "instructionsExamplesHidden": build_instructions_for_plan(problem,
             45,
-            &InterviewProfile::default(),
-            &InterviewGrounding::default(),
-            InterviewLoop::CodingBehavioral,
-            true,
-            InterviewMode::Coding,
+            &codetrial::runtime::RuntimeOptions {
+                profile: InterviewProfile::default(),
+                grounding: InterviewGrounding::default(),
+                interview_loop: InterviewLoop::CodingBehavioral,
+                examples_hidden: true,
+                interview_mode: InterviewMode::Coding,
+                code_execution_disabled: false,
+            },
         ),
         "boardInstructions": board_instructions(problem, 45),
         "greeting": greeting(InterviewMode::Coding),
@@ -577,6 +588,25 @@ fn prompt_samples() -> Value {
         runner_unavailable: Some("python".to_string()),
         ..RuntimeState::default()
     }));
+    let execution_disabled = RuntimeState {
+        code_execution_disabled: true,
+        ..RuntimeState::default()
+    };
+    prompts["instructionsExecutionDisabled"] = json!(build_instructions_for_plan(
+        problem,
+        45,
+        &codetrial::runtime::RuntimeOptions {
+            profile: InterviewProfile::default(),
+            grounding: InterviewGrounding::default(),
+            interview_loop: InterviewLoop::CodingBehavioral,
+            examples_hidden: false,
+            interview_mode: InterviewMode::Coding,
+            code_execution_disabled: true,
+        },
+    ));
+    prompts["timeExecutionDisabled"] = json!(time_warning(&execution_disabled));
+    prompts["coldRestartExecutionDisabled"] = json!(cold_restart(&execution_disabled));
+    prompts["silenceExecutionDisabled"] = json!(silence_nudge(&execution_disabled, "", None));
 
     // The states the #66 prompts differ on: a run of the code on screen, and
     // that run with the coding gate passed.

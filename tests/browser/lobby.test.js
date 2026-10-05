@@ -307,13 +307,14 @@ function lobbyTest(name, body, options) {
 }
 
 lobbyTest(
-  "editor options default to all four features enabled",
+  "editor options default to all five features enabled",
   async (page) => {
     await lobby(page);
     const group = page.getByRole("group", { name: "Editor options" });
-    assert.equal(await group.getByRole("checkbox").count(), 4);
+    assert.equal(await group.getByRole("checkbox").count(), 5);
     for (const label of [
       "Syntax highlighting",
+      "Code execution",
       "Auto indentation",
       "Bracket auto-close",
       "Monospace font",
@@ -385,12 +386,22 @@ lobbyTest(
         .isChecked(),
       false,
     );
+    assert.equal(
+      await page
+        .getByRole("checkbox", { name: "Code execution", exact: true })
+        .isChecked(),
+      true,
+    );
     await page.click("#start");
     await page.waitForURL(/\/interview/);
     const params = new URL(page.url()).searchParams;
     assert.equal(params.get("editorHighlight"), "0");
     assert.equal(params.get("editorAutoClose"), "0");
-    for (const name of ["editorAutoIndent", "editorMonospace"])
+    for (const name of [
+      "editorExecution",
+      "editorAutoIndent",
+      "editorMonospace",
+    ])
       assert.equal(params.get(name), null, name);
     assert.ok(params.get("problem"));
   },
@@ -402,7 +413,7 @@ lobbyTest(
     session = { signedIn: false, loginRequired: true };
     await lobby(page);
     await page
-      .getByRole("checkbox", { name: "Auto indentation", exact: true })
+      .getByRole("checkbox", { name: "Code execution", exact: true })
       .uncheck();
     let finishLogin;
     holdLogin = new Promise((resolve) => (finishLogin = resolve));
@@ -414,7 +425,7 @@ lobbyTest(
       await page.click("#start");
       await request;
       await page
-        .getByRole("checkbox", { name: "Auto indentation", exact: true })
+        .getByRole("checkbox", { name: "Code execution", exact: true })
         .check();
       await page
         .getByRole("checkbox", { name: "Monospace font", exact: true })
@@ -422,7 +433,7 @@ lobbyTest(
       finishLogin();
       await page.waitForURL(/\/interview/);
       const params = new URL(page.url()).searchParams;
-      assert.equal(params.get("editorAutoIndent"), "0");
+      assert.equal(params.get("editorExecution"), "0");
       assert.equal(params.get("editorMonospace"), null);
     } finally {
       finishLogin();

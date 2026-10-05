@@ -959,10 +959,34 @@ test("disabled compiled runners withhold their languages for every judge", () =>
       for (const language of COMPILED_LANGUAGES) {
         assert.match(harnessGap(language, spec), /disabled by this server/);
       }
+      const available =
+        spec?.kind === "function"
+          ? ALL_LANGUAGES
+          : ALL_LANGUAGES.filter((language) => language !== "c");
+      assert.deepEqual(languagesFor(spec, false), available);
+      for (const language of available) {
+        assert.equal(harnessGap(language, spec, false), null);
+      }
+      if (!available.includes("c"))
+        assert.match(harnessGap("c", spec, false), /function/);
     }
   } finally {
     if (previous === undefined)
       delete globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED;
     else globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED = previous;
+  }
+});
+
+test("execution-disabled languages have starter code for every problem", () => {
+  for (const [id, spec] of Object.entries(judges)) {
+    const problem = JSON.parse(
+      readFileSync(webFile(`problems/${pageMap[id].page}.json`), "utf8"),
+    );
+    for (const language of languagesFor(spec, false))
+      assert.equal(
+        typeof problem.starterCode[language],
+        "string",
+        `${id}: ${language}`,
+      );
   }
 });

@@ -212,6 +212,50 @@ fn token_interview_loop_is_allowlisted_and_defaults_to_combined() {
 }
 
 #[test]
+fn only_explicit_false_disables_execution_in_signed_metadata() {
+    let config = TokenConfig {
+        api_key: "key",
+        api_secret: "secret",
+        server_url: "wss://example.test",
+        recording_max_min: None,
+    };
+    for value in [
+        json!(false),
+        json!(true),
+        json!(null),
+        json!(0),
+        json!("false"),
+        json!({}),
+    ] {
+        let body = serde_json::to_vec(&json!({"codeExecution": value})).unwrap();
+        let response = token_response(&config, &body, "room", "candidate", 2_000).unwrap();
+        let token_claims = claims(&response.token);
+        let metadata = token_claims["metadata"].as_str().unwrap();
+        let parsed: Value = serde_json::from_str(metadata).unwrap();
+        assert_eq!(
+            parsed.get("codeExecution"),
+            if value == false {
+                Some(&Value::Bool(false))
+            } else {
+                None
+            }
+        );
+        assert_eq!(
+            codetrial::agent::parse_participant_metadata(Some(metadata)).code_execution_disabled,
+            value == false
+        );
+    }
+    for metadata in [
+        None,
+        Some("{}"),
+        Some("not json"),
+        Some(r#"{"codeExecution":"false"}"#),
+    ] {
+        assert!(!codetrial::agent::parse_participant_metadata(metadata).code_execution_disabled);
+    }
+}
+
+#[test]
 fn token_profile_is_bounded_and_enum_validated_before_signed_metadata() {
     let response = token_response(
         &TokenConfig {

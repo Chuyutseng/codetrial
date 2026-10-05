@@ -439,6 +439,10 @@ fn apply_test_results(
     since_last_test_reaction_seconds: f64,
     receipt_timestamp_ms: u64,
 ) -> DataEventResult {
+    if state.code_execution_disabled {
+        return DataEventResult::default();
+    }
+
     // The browser timestamp is a claim stored only as evidence metadata. Read
     // it before sanitizing, because the prompt-facing test payload deliberately
     // drops fields it does not render.

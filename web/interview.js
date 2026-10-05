@@ -489,6 +489,7 @@ const nodes = {
   editorThemeToggle: document.querySelector("#editor-theme-toggle"),
   compileDisclosure: document.querySelector(".compile-disclosure"),
   run: document.querySelector("#run-tests"),
+  testDrawer: document.querySelector(".test-drawer"),
   candidateCaseInput: document.querySelector("#candidate-case-input"),
   candidateCaseExpected: document.querySelector("#candidate-case-expected"),
   candidateCaseAdd: document.querySelector("#candidate-case-add"),
@@ -636,11 +637,15 @@ async function init() {
 }
 
 function renderRuntimeConfig() {
+  nodes.run.hidden = !editorOptions.execution;
+  nodes.testDrawer.hidden = !editorOptions.execution;
   // No origin literal here: /runtime-config.js supplies it, and the server is
   // the only place that may name it, because the same value builds the CSP.
-  nodes.compileDisclosure.textContent = compiledTestsEnabled()
-    ? "C, C++ and Java runs are sent to Compiler Explorer."
-    : "C, C++ and Java test runs are disabled by this server.";
+  nodes.compileDisclosure.textContent = !editorOptions.execution
+    ? "Code execution is disabled. Verify your code by walking through cases by hand."
+    : compiledTestsEnabled()
+      ? "C, C++ and Java runs are sent to Compiler Explorer."
+      : "C, C++ and Java test runs are disabled by this server.";
 }
 
 // This flag is the actual guard: set for exactly the duration of the call,
@@ -734,7 +739,7 @@ function bindEvents() {
     )
       return;
     event.preventDefault();
-    if (event.repeat) return;
+    if (event.repeat || !editorOptions.execution) return;
     if (nodes.audioCheck.hidden && !codingClosed()) nodes.run.click();
   });
   nodes.candidateCaseAdd.addEventListener(
@@ -1286,6 +1291,7 @@ async function connect(preflight, presenting = false) {
         interviewProfile,
         ...(interviewGrounding ? { interviewGrounding } : {}),
         ...(nodes.hideExamples.checked ? { hideExamples: true } : {}),
+        ...(!editorOptions.execution ? { codeExecution: false } : {}),
       }),
     });
     if (!response.ok)
@@ -1988,9 +1994,13 @@ function selectTab(tab) {
 /// visible: hiding it would replace the candidate's final submission with a
 /// starter buffer when the judge response arrives late.
 function applyLanguages(spec) {
-  languages = languagesFor(spec);
+  languages = languagesFor(spec, editorOptions.execution);
   for (const button of document.querySelectorAll("[data-language]")) {
-    const gap = harnessGap(button.dataset.language, spec);
+    const gap = harnessGap(
+      button.dataset.language,
+      spec,
+      editorOptions.execution,
+    );
     button.disabled = gap !== null;
     button.title = gap ?? "";
   }
@@ -2444,6 +2454,7 @@ function applyPause(paused) {
 }
 
 async function runTests() {
+  if (!editorOptions.execution) return;
   flushPendingCodePublish();
   state.runningTests = true;
   nodes.run.disabled = true;
@@ -2638,6 +2649,7 @@ function removeCandidateCase(index) {
 
 function updateRunAvailability() {
   nodes.run.disabled =
+    !editorOptions.execution ||
     state.runningTests ||
     state.paused ||
     codingClosed() ||
@@ -2921,6 +2933,9 @@ async function showReport() {
       reportUnreadable: state.reportUnreadable,
     }),
     interviewLoop,
+    ...(!whiteboard && !editorOptions.execution
+      ? { codeExecution: false }
+      : {}),
     rounds: [
       {
         kind: "coding",

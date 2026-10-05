@@ -330,7 +330,7 @@ test("the interview page keeps the structure the script drives", () => {
   // The disclosure reads the same "compiled runs are on" the tabs do.
   assert.match(
     script,
-    /compileDisclosure\.textContent = compiledTestsEnabled\(\)/,
+    /compileDisclosure\.textContent = !editorOptions\.execution[\s\S]*?: compiledTestsEnabled\(\)/,
   );
   assert.match(
     read("compiler-explorer.js"),

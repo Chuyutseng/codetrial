@@ -1710,6 +1710,29 @@ test("report views identify active and legacy scoring contracts", () => {
   );
 });
 
+test("report views and exports disclose disabled execution without changing old reports", () => {
+  for (const incomplete of [false, true]) {
+    for (const disabled of [false, true]) {
+      const session = {
+        report: sanitizeReport({
+          incomplete,
+          ...(disabled ? { codeExecution: false } : {}),
+        }),
+        problemTitle: "Two Sum",
+        language: "python",
+        code: "",
+        transcript: [],
+      };
+      for (const text of [reportMarkup(session), reportMarkdown(session)]) {
+        assert.equal(
+          text.includes("Code execution was disabled for this interview."),
+          disabled,
+        );
+      }
+    }
+  }
+});
+
 test("a report that recorded no loop is not given one", () => {
   // Reports written before the interview loop existed carry no interviewLoop,
   // and the exporter named one anyway, so a historical session was described

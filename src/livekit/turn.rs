@@ -1263,7 +1263,7 @@ impl RuntimeActivity {
             });
         }
         let excerpt = changed_excerpt(&state.language, &state.code_shown, &state.code);
-        let lines = state.evidence_ledger.prompt_view(ViewFor::Watch);
+        let lines = state.prompt_evidence(ViewFor::Watch);
         let evidence = evidence_delta(self.evidence_shown.as_deref(), &lines);
 
         // A nudge shows the code as a review does, so both move what the model

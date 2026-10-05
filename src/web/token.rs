@@ -260,6 +260,12 @@ pub fn token_response(
             .expect("metadata is an object")
             .insert("hideExamples".to_string(), Value::Bool(true));
     }
+    if request.get("codeExecution") == Some(&Value::Bool(false)) {
+        metadata
+            .as_object_mut()
+            .expect("metadata is an object")
+            .insert("codeExecution".to_string(), Value::Bool(false));
+    }
     let metadata = metadata.to_string();
 
     Ok(TokenResponse {

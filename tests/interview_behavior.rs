@@ -607,11 +607,14 @@ fn a_played_candidate_is_read_by_what_it_asks() {
     let instructions = build_instructions_for_plan(
         three_sum,
         45,
-        &InterviewProfile::default(),
-        &InterviewGrounding::default(),
-        InterviewLoop::CodingBehavioral,
-        false,
-        InterviewMode::Coding,
+        &codetrial::runtime::RuntimeOptions {
+            profile: InterviewProfile::default(),
+            grounding: InterviewGrounding::default(),
+            interview_loop: InterviewLoop::CodingBehavioral,
+            examples_hidden: false,
+            interview_mode: InterviewMode::Coding,
+            code_execution_disabled: false,
+        },
     );
     let answered = "Each distinct set of three values is reported once. If the same values occur at different positions, they do \
                     not count as separate groups. The list can contain between 3 and 3000 adjustments, each between -10^5 and 10^5.";
@@ -885,11 +888,14 @@ async fn uncertain_speech_is_clarified_without_crediting_or_correcting_it() {
                 instructions: build_instructions_for_plan(
                     problem,
                     45,
-                    &InterviewProfile::default(),
-                    &InterviewGrounding::default(),
-                    interview_loop,
-                    false,
-                    InterviewMode::Coding,
+                    &codetrial::runtime::RuntimeOptions {
+                        profile: InterviewProfile::default(),
+                        grounding: InterviewGrounding::default(),
+                        interview_loop,
+                        examples_hidden: false,
+                        interview_mode: InterviewMode::Coding,
+                        code_execution_disabled: false,
+                    },
                 ),
                 contents: vec![
                     json!({ "role": "user", "parts": [{ "text": "I am ready to work an example." }] }),
@@ -983,11 +989,14 @@ async fn live_interviewer_poses_the_variant_and_serves_hints_in_order() {
                 instructions: build_instructions_for_plan(
                     problem,
                     45,
-                    &InterviewProfile::default(),
-                    &InterviewGrounding::default(),
-                    InterviewLoop::CodingBehavioral,
-                    false,
-                    mode,
+                    &codetrial::runtime::RuntimeOptions {
+                        profile: InterviewProfile::default(),
+                        grounding: InterviewGrounding::default(),
+                        interview_loop: InterviewLoop::CodingBehavioral,
+                        examples_hidden: false,
+                        interview_mode: mode,
+                        code_execution_disabled: false,
+                    },
                 ),
                 contents: Vec::new(),
                 state: RuntimeState {
@@ -1452,11 +1461,14 @@ async fn played_candidates_are_held_to_the_same_rules() {
             let instructions = build_instructions_for_plan(
                 problem,
                 45,
-                &InterviewProfile::default(),
-                &InterviewGrounding::default(),
-                InterviewLoop::CodingBehavioral,
-                false,
-                InterviewMode::Coding,
+                &codetrial::runtime::RuntimeOptions {
+                    profile: InterviewProfile::default(),
+                    grounding: InterviewGrounding::default(),
+                    interview_loop: InterviewLoop::CodingBehavioral,
+                    examples_hidden: false,
+                    interview_mode: InterviewMode::Coding,
+                    code_execution_disabled: false,
+                },
             );
             let mut conversation = Conversation {
                 client: reqwest::Client::new(),
@@ -1526,11 +1538,14 @@ async fn conversational_reacto_answers_are_recorded_in_the_same_reply() {
         instructions: build_instructions_for_plan(
             problem,
             45,
-            &InterviewProfile::default(),
-            &InterviewGrounding::default(),
-            InterviewLoop::CodingOnly,
-            false,
-            InterviewMode::Coding,
+            &codetrial::runtime::RuntimeOptions {
+                profile: InterviewProfile::default(),
+                grounding: InterviewGrounding::default(),
+                interview_loop: InterviewLoop::CodingOnly,
+                examples_hidden: false,
+                interview_mode: InterviewMode::Coding,
+                code_execution_disabled: false,
+            },
         ),
         contents: vec![
             json!({"role": "user", "parts": [{"text": "I choose Python."}]}),

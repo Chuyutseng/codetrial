@@ -3,6 +3,7 @@ import { readStored, writeStored } from "./audio-output.js";
 const STORAGE_KEY = "codetrial:editorOptions";
 const PARAMETERS = {
   highlight: "editorHighlight",
+  execution: "editorExecution",
   autoIndent: "editorAutoIndent",
   autoClose: "editorAutoClose",
   monospace: "editorMonospace",

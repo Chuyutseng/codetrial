@@ -10,6 +10,7 @@ import { memoryStorage } from "./source.js";
 
 const defaults = {
   highlight: true,
+  execution: true,
   autoIndent: true,
   autoClose: true,
   monospace: true,
@@ -58,6 +59,7 @@ test("reenabling options removes their URL overrides", () => {
     false,
     false,
     false,
+    false,
   ]);
   setEditorOptions(params, defaults);
   assert.equal(params.toString(), "");
@@ -66,7 +68,7 @@ test("reenabling options removes their URL overrides", () => {
 test("preferences survive a reload without changing an existing interview URL", () => {
   const storage = memoryStorage();
   assert.deepEqual(loadEditorOptions(storage), defaults);
-  const options = { ...defaults, highlight: false, autoIndent: false };
+  const options = { ...defaults, highlight: false, execution: false };
   saveEditorOptions(options, storage);
   assert.deepEqual(loadEditorOptions(storage), options);
   const params = new URLSearchParams();

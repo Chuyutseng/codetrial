@@ -35,6 +35,7 @@ pub struct RuntimeBootstrap<'a> {
     pub duration_min: u32,
     pub interview_loop: InterviewLoop,
     pub interview_mode: InterviewMode,
+    pub code_execution_disabled: bool,
     pub coding_minutes: u32,
     pub behavioral_minutes: u32,
     pub profile: InterviewProfile,
@@ -67,6 +68,7 @@ pub struct RuntimeOptions {
     pub interview_loop: InterviewLoop,
     pub examples_hidden: bool,
     pub interview_mode: InterviewMode,
+    pub code_execution_disabled: bool,
 }
 
 pub fn bootstrap<'a>(
@@ -97,6 +99,7 @@ pub fn bootstrap_with_rounds<'a>(
         interview_loop,
         examples_hidden,
         interview_mode,
+        code_execution_disabled,
     } = options;
     let problem = get_problem(problem_id);
     let duration_min = duration_min.clamp(MIN_DURATION_MIN, MAX_DURATION_MIN);
@@ -111,16 +114,20 @@ pub fn bootstrap_with_rounds<'a>(
         duration_min,
         interview_loop,
         interview_mode,
+        code_execution_disabled,
         coding_minutes,
         behavioral_minutes,
         instructions: build_instructions_for_plan(
             problem,
             duration_min,
-            &profile,
-            &grounding,
-            interview_loop,
-            examples_hidden,
-            interview_mode,
+            &RuntimeOptions {
+                profile: profile.clone(),
+                grounding: grounding.clone(),
+                interview_loop,
+                examples_hidden,
+                interview_mode,
+                code_execution_disabled,
+            },
         ),
         profile,
         grounding,
