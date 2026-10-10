@@ -7,6 +7,39 @@ use super::{
     rewritten, uncommented_chars,
 };
 
+#[test]
+fn refusing_an_early_end_requests_traces_when_execution_is_disabled() {
+    for interview_loop in [
+        super::InterviewLoop::CodingOnly,
+        super::InterviewLoop::CodingBehavioral,
+    ] {
+        let state = RuntimeState {
+            code_execution_disabled: true,
+            interview_loop,
+            code: "def solve(nums):\n    return sorted(nums)".to_string(),
+            ..RuntimeState::default()
+        };
+        let refusal = super::end_interview_refusal(&state);
+        assert!(refusal.contains("trace their written code by hand"));
+        assert!(!refusal.contains("click Run"));
+        assert!(!refusal.contains("runner cannot provide tests"));
+    }
+}
+
+#[test]
+fn editor_execution_preferences_do_not_change_whiteboard_test_evidence() {
+    let state = RuntimeState {
+        interview_mode: super::InterviewMode::Whiteboard,
+        code_execution_disabled: true,
+        ..RuntimeState::default()
+    };
+    assert_eq!(super::test_source(&state), super::TestSource::Board);
+    assert!(!super::test_recordable(&state));
+    let refusal = super::end_interview_refusal(&state);
+    assert!(refusal.contains("cases that would break their drawing"));
+    assert!(!refusal.contains("written code"));
+}
+
 /// What was typed, the half of `changed_characters` the starter check reads.
 fn count(template: &str, code: &str) -> Option<usize> {
     let template = template.chars().collect::<Vec<_>>();

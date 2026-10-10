@@ -335,6 +335,10 @@ export function reportMarkup({
   const rounds = report.rounds?.length
     ? `<section><h3>Interview rounds</h3><ul>${report.rounds.map((round) => `<li>${escapeHtml(round.kind)} · ${escapeHtml(round.budgetMin)} min · ${escapeHtml(round.status)}</li>`).join("")}</ul></section>`
     : "";
+  const executionNote =
+    report.codeExecution === false
+      ? '<p class="muted small">Code execution was disabled for this interview.</p>'
+      : "";
   const contract = report.interviewContract
     ? `Contract bundle ${report.interviewContract.bundleVersion} · rubric ${report.interviewContract.rubricVersion} · report schema ${report.interviewContract.reportSchemaVersion}`
     : "Legacy/unversioned contract";
@@ -354,7 +358,7 @@ export function reportMarkup({
       ${feedback}
       ${practiceNext}
       ${debrief}
-      ${rounds}
+      ${rounds}${executionNote}
       ${phaseScores}
       ${frameworkTimeline}
       ${integrityEvidenceMarkup(report)}
@@ -675,6 +679,9 @@ export function reportMarkdown({
       : []),
     ...(report.interviewMode
       ? [`Held at: ${surfaceLabel(report.interviewMode)}`]
+      : []),
+    ...(report.codeExecution === false
+      ? ["Code execution was disabled for this interview."]
       : []),
     report.interviewContract
       ? `Contract: bundle ${report.interviewContract.bundleVersion}; live prompt ${report.interviewContract.livePromptVersion}; report prompt ${report.interviewContract.reportPromptVersion}; rubric ${report.interviewContract.rubricVersion}; report schema ${report.interviewContract.reportSchemaVersion}`

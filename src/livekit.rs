@@ -1356,8 +1356,7 @@ fn take_interim_review_window(state: &mut RuntimeState, boot: &RuntimeBootstrap<
         .len()
         .saturating_sub(INTERIM_CONTEXT_NOTES);
     let evidence = state
-        .evidence_ledger
-        .prompt_view(crate::agent::ViewFor::Interim)
+        .prompt_evidence(crate::agent::ViewFor::Interim)
         .join("\n");
     let code = if state.code.trim().is_empty() {
         // The cursor moves here too, because it records what the last review
@@ -2868,6 +2867,8 @@ fn candidate_bootstrap<'a>(
             interview_loop: candidate.interview_loop,
             examples_hidden: candidate.examples_hidden,
             interview_mode: candidate.interview_mode,
+            code_execution_disabled: candidate.code_execution_disabled
+                && !candidate.interview_mode.is_whiteboard(),
         },
     )
 }
@@ -2909,6 +2910,7 @@ fn initial_runtime_state(boot: &RuntimeBootstrap<'_>, started_at: Instant) -> Ru
         started_at,
         interview_loop: boot.interview_loop,
         interview_mode: boot.interview_mode,
+        code_execution_disabled: boot.code_execution_disabled,
         coding_minutes: boot.coding_minutes,
         behavioral_minutes: boot.behavioral_minutes,
         context_compression: boot.context_compression,

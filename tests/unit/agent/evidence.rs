@@ -33,6 +33,27 @@ fn record_unparsed(
     );
 }
 
+#[test]
+fn every_assessment_view_keeps_the_disabled_execution_choice() {
+    for purpose in [ViewFor::Watch, ViewFor::Interim, ViewFor::Report] {
+        let normal = RuntimeState::default();
+        let disabled = RuntimeState {
+            code_execution_disabled: true,
+            ..normal.clone()
+        };
+        let normal_lines = normal.prompt_evidence(purpose);
+        let disabled_lines = disabled.prompt_evidence(purpose);
+        assert_eq!(&disabled_lines[..normal_lines.len()], normal_lines);
+        assert_eq!(disabled_lines.len(), normal_lines.len() + 1);
+        assert!(
+            disabled_lines
+                .last()
+                .unwrap()
+                .contains("hand traces, not executed cases")
+        );
+    }
+}
+
 fn failed(label: &str) -> serde_json::Value {
     serde_json::json!({
         "passed": 1,

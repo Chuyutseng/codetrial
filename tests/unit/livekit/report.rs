@@ -31,6 +31,126 @@ fn report_test_config() -> crate::config::AgentConfig {
     .unwrap()
 }
 
+#[test]
+fn reports_take_the_execution_choice_from_session_state_not_model_output() {
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    for incomplete in [false, true] {
+        let disabled = RuntimeState {
+            code_execution_disabled: true,
+            ..RuntimeState::default()
+        };
+        let report = report_with_integrity_events(
+            serde_json::json!({"incomplete": incomplete, "codeExecution": true}),
+            &disabled,
+            "time_up",
+        );
+        assert_eq!(report["codeExecution"], false);
+        assert_eq!(report["incomplete"], incomplete);
+        assert!(
+            report_prompt_text(&boot, &disabled, 45.0, false).contains("disabled by the candidate")
+        );
+        let normal = RuntimeState::default();
+        let report = report_with_integrity_events(
+            serde_json::json!({"incomplete": incomplete, "codeExecution": false}),
+            &normal,
+            "time_up",
+        );
+        assert!(report.get("codeExecution").is_none());
+        assert!(
+            !report_prompt_text(&boot, &normal, 45.0, false).contains("disabled by the candidate")
+        );
+    }
+}
+
+#[test]
+fn execution_choice_reaches_report_evidence_without_ledger_entries() {
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    for disabled in [false, true] {
+        let state = RuntimeState {
+            code_execution_disabled: disabled,
+            ..RuntimeState::default()
+        };
+        assert!(state.evidence_ledger.entries.is_empty());
+        let prompt = report_prompt_text(&boot, &state, 45.0, false);
+        let evidence = prompt.split_once("DETERMINISTIC SESSION EVIDENCE");
+        assert_eq!(evidence.is_some(), disabled);
+        if let Some((_, evidence)) = evidence {
+            let evidence = evidence.split("The three blocks below").next().unwrap();
+            assert!(evidence.contains("Code execution: disabled by the candidate"));
+        }
+    }
+}
+
+#[test]
+fn disabled_execution_reports_explain_why_no_run_exists() {
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    for disabled in [false, true] {
+        let state = RuntimeState {
+            code_execution_disabled: disabled,
+            ..RuntimeState::default()
+        };
+        let prompt = report_prompt_text(&boot, &state, 45.0, false);
+        let execution = prompt
+            .split("BEGIN UNTRUSTED TEST-CASE EXECUTION\n")
+            .nth(1)
+            .unwrap()
+            .split("END UNTRUSTED TEST-CASE EXECUTION")
+            .next()
+            .unwrap();
+        assert_eq!(
+            execution.contains("execution was disabled by the candidate"),
+            disabled
+        );
+        assert_eq!(
+            execution.contains("testing evidence is the candidate's hand trace"),
+            disabled
+        );
+        assert_eq!(
+            execution.contains("tests may not have been attempted"),
+            !disabled
+        );
+    }
+}
+
+#[test]
+fn whiteboard_reports_and_prompts_ignore_editor_execution_preferences() {
+    let config = report_test_config();
+    let boot = super::super::candidate_bootstrap(
+        &config,
+        "interview-fixed",
+        Some(r#"{"interviewMode":"whiteboard","codeExecution":false}"#),
+    );
+    let state = super::super::initial_runtime_state(&boot, std::time::Instant::now());
+    assert!(state.interview_mode.is_whiteboard());
+    assert!(!boot.code_execution_disabled);
+    assert!(!state.code_execution_disabled);
+    assert!(!boot.instructions.contains("disabled for this interview"));
+    assert!(!report_prompt_text(&boot, &state, 45.0, false).contains("disabled by the candidate"));
+    for purpose in [
+        crate::agent::ViewFor::Watch,
+        crate::agent::ViewFor::Interim,
+        crate::agent::ViewFor::Report,
+    ] {
+        assert!(
+            !state
+                .prompt_evidence(purpose)
+                .join("\n")
+                .contains("disabled by the candidate")
+        );
+    }
+    for incomplete in [false, true] {
+        let report = report_with_integrity_events(
+            serde_json::json!({"incomplete": incomplete, "codeExecution": false}),
+            &state,
+            "time_up",
+        );
+        assert!(report.get("codeExecution").is_none());
+    }
+}
+
 /// The report says which rounds actually completed, from banked evidence.
 ///
 /// Two gates, and both are the same shape: every phase of the round needs

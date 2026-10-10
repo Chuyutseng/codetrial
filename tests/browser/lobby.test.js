@@ -306,6 +306,141 @@ function lobbyTest(name, body, options) {
   });
 }
 
+lobbyTest(
+  "editor options default to all five features enabled",
+  async (page) => {
+    await lobby(page);
+    const group = page.getByRole("group", { name: "Editor options" });
+    assert.equal(await group.getByRole("checkbox").count(), 5);
+    for (const label of [
+      "Syntax highlighting",
+      "Code execution",
+      "Auto indentation",
+      "Bracket auto-close",
+      "Monospace font",
+    ])
+      assert.equal(
+        await group
+          .getByRole("checkbox", { name: label, exact: true })
+          .isChecked(),
+        true,
+        label,
+      );
+    const difficulty = await page
+      .getByRole("group", { name: "Difficulty", exact: true })
+      .boundingBox();
+    const options = await group.boundingBox();
+    assert.ok(options.y >= difficulty.y + difficulty.height);
+    await page.setViewportSize({ width: 375, height: 800 });
+    for (const label of await group.locator("label").all()) {
+      const bounds = await label.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 375);
+    }
+  },
+);
+
+lobbyTest(
+  "whiteboard disables editor options without losing editor preferences",
+  async (page) => {
+    await lobby(page);
+    const group = page.getByRole("group", { name: "Editor options" });
+    const highlight = group.getByRole("checkbox", {
+      name: "Syntax highlighting",
+      exact: true,
+    });
+    await highlight.uncheck();
+    await page.locator('[data-mode="whiteboard"]').click();
+    for (const input of await group.getByRole("checkbox").all())
+      assert.equal(await input.isDisabled(), true);
+    assert.equal(await highlight.isChecked(), false);
+    await page.locator('[data-mode="coding"]').click();
+    for (const input of await group.getByRole("checkbox").all())
+      assert.equal(await input.isDisabled(), false);
+    assert.equal(await highlight.isChecked(), false);
+    await lobby(page);
+    assert.equal(await highlight.isChecked(), false);
+    assert.equal(await highlight.isDisabled(), false);
+  },
+);
+
+lobbyTest(
+  "editor options survive reloads and travel with the selected problem",
+  async (page) => {
+    await lobby(page);
+    await page
+      .getByRole("checkbox", { name: "Syntax highlighting", exact: true })
+      .uncheck();
+    await page
+      .getByRole("checkbox", { name: "Bracket auto-close", exact: true })
+      .uncheck();
+    await lobby(page);
+    assert.equal(
+      await page
+        .getByRole("checkbox", { name: "Syntax highlighting", exact: true })
+        .isChecked(),
+      false,
+    );
+    assert.equal(
+      await page
+        .getByRole("checkbox", { name: "Bracket auto-close", exact: true })
+        .isChecked(),
+      false,
+    );
+    assert.equal(
+      await page
+        .getByRole("checkbox", { name: "Code execution", exact: true })
+        .isChecked(),
+      true,
+    );
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
+    const params = new URL(page.url()).searchParams;
+    assert.equal(params.get("editorHighlight"), "0");
+    assert.equal(params.get("editorAutoClose"), "0");
+    for (const name of [
+      "editorExecution",
+      "editorAutoIndent",
+      "editorMonospace",
+    ])
+      assert.equal(params.get(name), null, name);
+    assert.ok(params.get("problem"));
+  },
+);
+
+lobbyTest(
+  "editor options are captured before the start waits for login",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page
+      .getByRole("checkbox", { name: "Code execution", exact: true })
+      .uncheck();
+    let finishLogin;
+    holdLogin = new Promise((resolve) => (finishLogin = resolve));
+    try {
+      await page.fill("#github-login", "candidate");
+      const request = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/api/login",
+      );
+      await page.click("#start");
+      await request;
+      await page
+        .getByRole("checkbox", { name: "Code execution", exact: true })
+        .check();
+      await page
+        .getByRole("checkbox", { name: "Monospace font", exact: true })
+        .uncheck();
+      finishLogin();
+      await page.waitForURL(/\/interview/);
+      const params = new URL(page.url()).searchParams;
+      assert.equal(params.get("editorExecution"), "0");
+      assert.equal(params.get("editorMonospace"), null);
+    } finally {
+      finishLogin();
+    }
+  },
+);
+
 /// A lobby whose two fetches are still in flight, and the release that lets
 /// them land. Everything between is the pre-history state.
 async function heldLobby(page) {
@@ -356,16 +491,22 @@ lobbyTest(
     // `lobbyTest`, leaving an 800 written here and a 720 on screen.
     const { height } = page.viewportSize();
     // The whole reason the picker collapsed. 150 cards made this about 7500.
-    const closed = await page.evaluate(() => document.body.scrollHeight);
-    assert.ok(
-      closed <= height,
-      `the lobby is ${closed}px tall, past one ${height}px screen`,
-    );
+    for (const font of ["", "Arial, sans-serif"]) {
+      await page.evaluate((font) => {
+        document.body.style.fontFamily = font;
+      }, font);
+      const closed = await page.evaluate(() => document.body.scrollHeight);
+      assert.ok(
+        closed <= height,
+        `the lobby is ${closed}px tall with ${font || "the system font"}, past one ${height}px screen`,
+      );
 
-    // And the wall is still reachable, just not in the way.
-    await page.click("details.problem-picker summary");
-    const open = await page.evaluate(() => document.body.scrollHeight);
-    assert.ok(open > closed, "opening the picker shows nothing");
+      // And the wall is still reachable, just not in the way.
+      await page.click("details.problem-picker summary");
+      const open = await page.evaluate(() => document.body.scrollHeight);
+      assert.ok(open > closed, "opening the picker shows nothing");
+      await page.click("details.problem-picker summary");
+    }
   },
   { viewport: { width: 1280, height: 800 } },
 );

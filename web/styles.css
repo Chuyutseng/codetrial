@@ -96,6 +96,10 @@ main {
   padding: 2.5rem 1.25rem;
 }
 
+.lobby {
+  padding-block: 1.5rem;
+}
+
 @media (min-width: 640px) {
   main {
     padding-right: 2rem;
@@ -168,13 +172,29 @@ p {
 }
 
 .difficulty-row,
+.editor-options-row,
+.random-picker,
 .problem-picker {
   margin-top: 1.5rem;
 }
 
+@media (min-width: 640px) and (max-height: 850px) {
+  .lobby {
+    padding-block: 1rem;
+  }
+
+  .lobby .difficulty-row,
+  .lobby .editor-options-row,
+  .lobby .random-picker,
+  .lobby .problem-picker {
+    margin-top: 1rem;
+  }
+}
+
 /* Spacing comes from the shared control row below, so this only has to remove
    the chrome a fieldset brings with it. */
-.difficulty-row {
+.difficulty-row,
+.editor-options-row {
   padding: 0;
   border: 0;
 }
@@ -183,12 +203,14 @@ p {
    is styled as the row's caption rather than fought into the flex line.
    `--sub` and not `--muted`: this is the name of a control, and `--muted`
    measures 4.22 against the page, under the 4.5 that normal text needs. */
-.difficulty-row legend {
+.difficulty-row legend,
+.editor-options-row legend {
   padding: 0 0 0.5rem;
   color: var(--sub);
 }
 
 .difficulty-row label,
+.editor-options-row label,
 .problem-picker summary {
   cursor: pointer;
 }
@@ -211,7 +233,6 @@ p {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 1rem;
-  margin-top: 0.5rem;
 }
 
 /* Beside the button wherever the line gets a readable width, which keeps the
@@ -553,6 +574,7 @@ p {
 .tab-row,
 .difficulty-row,
 .board-toolbar,
+.editor-options-row,
 .editor-toolbar,
 .language-tabs,
 .font-size-control,
@@ -979,6 +1001,7 @@ p {
      but never drops below 3.25rem, or a four-digit one is clipped at the
      smallest. */
   --editor-font-size: 0.875rem;
+  --editor-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --editor-gutter: max(3.25rem, calc(var(--editor-font-size) * 3.72));
   position: relative;
   flex: 1;
@@ -1043,7 +1066,7 @@ p {
   margin: 0;
   border: 0;
   padding: 1rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--editor-font-family);
   font-size: var(--editor-font-size);
   line-height: 1.5;
   tab-size: 4;
@@ -1110,6 +1133,10 @@ p {
 
 #editor::-webkit-scrollbar {
   display: none;
+}
+
+.plain-text #editor {
+  color: var(--code-text);
 }
 
 /* Make textarea text visible when its selection background hides the syntax layer. */

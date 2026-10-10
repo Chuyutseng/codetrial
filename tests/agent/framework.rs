@@ -1801,6 +1801,76 @@ fn tested(state: &mut RuntimeState) -> Result<FrameworkEvidence, &'static str> {
 }
 
 #[test]
+fn disabled_execution_credits_traces_but_never_test_packets() {
+    let mut state = with_written_code(RuntimeState {
+        code_execution_disabled: true,
+        ..RuntimeState::default()
+    });
+    let mut before = state.clone();
+    let packet = json!({"passed": 5, "total": 5, "language": state.language, "code": state.code});
+    let result = apply_data_event(&mut state, TOPIC_TEST_RESULTS, &packet, 99.0);
+    // Receipt is counted even when the packet is refused as testing evidence.
+    before.evidence_ledger.metrics.raw_events_received += 1;
+    assert_eq!(
+        state, before,
+        "a packet cannot invent an executed run in this mode"
+    );
+    assert!(result.generate_reply.is_none());
+    assert!(result.test_run.is_none());
+    assert!(
+        tested(&mut state)
+            .unwrap_err()
+            .contains("execution is disabled")
+    );
+    record_framework_evidence(
+        &mut state,
+        &json!({"phase": "test", "source": "candidate_speech", "kind": "observed",
+        "confidence": 90, "summary": "Candidate traced an ordinary and a boundary case."}),
+    )
+    .unwrap();
+    assert_eq!(framework_progress(&state), ["test"]);
+    assert!(
+        state.runner_unavailable.is_none(),
+        "the choice is not a platform outage"
+    );
+    assert!(state.tested_code.is_none());
+    assert_eq!(state.test_runs, 0);
+}
+
+#[test]
+fn disabled_execution_keeps_the_written_code_gate_across_language_switches() {
+    for (language, code) in [
+        ("python", "def solve(nums):\n    return sorted(nums)"),
+        ("javascript", "function solve(nums) { return nums.sort(); }"),
+        ("cpp", "int solve() { return 42; }"),
+    ] {
+        let mut state = RuntimeState {
+            code_execution_disabled: true,
+            ..RuntimeState::for_problem(get_problem(Some("two-sum")))
+        };
+        let trace = json!({"phase": "test", "source": "candidate_speech", "kind": "observed",
+            "confidence": 90, "summary": "Candidate traced written code."});
+        assert!(
+            record_framework_evidence(&mut state, &trace).is_err(),
+            "a trace cannot validate an unwritten solution"
+        );
+        type_code(&mut state, language, code);
+        assert!(state.code_execution_disabled);
+        record_framework_evidence(&mut state, &trace).unwrap();
+        assert_eq!(framework_progress(&state), ["test"], "{language}");
+    }
+    let mut normal = with_written_code(RuntimeState::default());
+    assert!(
+        record_framework_evidence(
+            &mut normal,
+            &json!({"phase": "test", "source": "candidate_speech", "kind": "observed",
+        "confidence": 90, "summary": "Candidate traced code without running it."})
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn test_execution_credit_requires_written_code_and_survives_a_later_outage() {
     let mut state = RuntimeState::default();
     type_code(&mut state, "python", "def solve(nums):\n    pass\n");

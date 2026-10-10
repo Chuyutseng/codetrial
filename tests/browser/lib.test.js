@@ -1073,6 +1073,23 @@ test("escapeHtml neutralizes every markup character", () => {
   );
 });
 
+test("saved reports preserve only an explicit disabled-execution choice", () => {
+  for (const incomplete of [false, true]) {
+    const raw = { incomplete, codeExecution: false };
+    const saved = JSON.parse(JSON.stringify(sanitizeReport(raw)));
+    assert.equal(sanitizeReport(saved).codeExecution, false);
+    for (const choice of [undefined, true, null, 0, "false"]) {
+      assert.equal(
+        Object.hasOwn(
+          sanitizeReport({ incomplete, codeExecution: choice }),
+          "codeExecution",
+        ),
+        false,
+      );
+    }
+  }
+});
+
 test("sanitizeReport clamps scores and strips markup from a hostile report", () => {
   const report = sanitizeReport({
     codingScore: "<img src=x onerror=alert(1)>",

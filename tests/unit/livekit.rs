@@ -90,11 +90,16 @@ fn the_interview_begins_from_the_plan_it_was_booked_with() {
         crate::runtime::RuntimeOptions {
             interview_loop: crate::agent::InterviewLoop::CodingOnly,
             interview_mode: crate::agent::InterviewMode::Whiteboard,
+            code_execution_disabled: true,
             ..crate::runtime::RuntimeOptions::default()
         },
     );
     let untouched = RuntimeState::default();
     for (named, same) in [
+        (
+            "code_execution_disabled",
+            boot.code_execution_disabled == untouched.code_execution_disabled,
+        ),
         (
             "interview_loop",
             boot.interview_loop == untouched.interview_loop,
@@ -127,6 +132,7 @@ fn the_interview_begins_from_the_plan_it_was_booked_with() {
     );
     assert_eq!(state.interview_loop, boot.interview_loop);
     assert_eq!(state.interview_mode, boot.interview_mode);
+    assert_eq!(state.code_execution_disabled, boot.code_execution_disabled);
     assert_eq!(state.coding_minutes, boot.coding_minutes);
     assert_eq!(state.behavioral_minutes, boot.behavioral_minutes);
     assert_eq!(state.hint_ladder, boot.problem.variant().hints);
@@ -569,7 +575,7 @@ fn candidate_bootstrap_uses_participant_metadata() {
         &config,
         "interview-fixed",
         Some(
-            r#"{"problemId":"merge-intervals","durationMin":30,"interviewLoop":"coding_only","interviewProfile":{"role":"Platform engineer","seniority":"staff","targetCompany":"Example Co"}}"#,
+            r#"{"problemId":"merge-intervals","durationMin":30,"interviewLoop":"coding_only","codeExecution":false,"interviewProfile":{"role":"Platform engineer","seniority":"staff","targetCompany":"Example Co"}}"#,
         ),
     );
 
@@ -579,6 +585,11 @@ fn candidate_bootstrap_uses_participant_metadata() {
     assert_eq!((boot.coding_minutes, boot.behavioral_minutes), (30, 0));
     assert_eq!(boot.profile.role, "Platform engineer");
     assert_eq!(boot.profile.target_company, "Example Co");
+    assert!(boot.code_execution_disabled);
+    assert!(
+        boot.instructions
+            .contains("code execution is disabled for this interview")
+    );
     assert!(boot.instructions.contains("candidate selected staff"));
 }
 

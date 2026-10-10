@@ -29,16 +29,25 @@ after(async () => {
 /// A page on the interview screen with an empty editor, no room joined. The
 /// editor is enabled as soon as bindEvents runs; nothing under test needs a
 /// live session, so this never waits on one.
-async function editorPage(t, configure = async () => {}) {
+async function editorPage(t, { params = {}, beforeLoad } = {}) {
   if (!browser) {
     t.skip("playwright chromium unavailable");
     return null;
   }
   const page = await browser.newPage();
-  await configure(page);
   const errors = [];
+  const parserRequests = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/vendor/tree-sitter"))
+      parserRequests.push(request.url());
+  });
+  await beforeLoad?.(page);
+  const query = new URLSearchParams({
+    problem: "chargeback-pair-match",
+    ...params,
+  });
+  await page.goto(`${base}/interview.html?${query}`, {
     waitUntil: "domcontentloaded",
   });
   await page.waitForSelector("#editor:not([disabled])");
@@ -56,7 +65,7 @@ async function editorPage(t, configure = async () => {}) {
   await page.waitForFunction(
     () => document.querySelector("#editor").value === "",
   );
-  return { page, errors };
+  return { page, errors, parserRequests };
 }
 
 /// The editor's value and caret, the way lobby.test.js's snapshot(page) reads
@@ -71,6 +80,19 @@ const caretState = (page) =>
       end: editor.selectionEnd,
     };
   });
+
+const setCode = (page, value, start = value.length, end = start) =>
+  page.evaluate(
+    async ({ value, start, end }) => {
+      const editor = document.querySelector("#editor");
+      editor.value = value;
+      editor.setSelectionRange(start, end);
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+      editor.focus();
+      await new Promise(requestAnimationFrame);
+    },
+    { value, start, end },
+  );
 
 test("typing an opening bracket auto-closes it, in a real browser", async (t) => {
   const ctx = await editorPage(t);
@@ -307,22 +329,24 @@ test("blur clears matching brackets before activeElement changes", async (t) => 
 });
 
 test("caret and focus changes reuse ranges until code or language changes", async (t) => {
-  const ctx = await editorPage(t, async (page) => {
-    await page.route("**/tokenizer.js", async (route) => {
-      const response = await route.fetch();
-      const source = await response.text();
-      const declaration =
-        "export function tokenize(code, language, parse = parseSyntax) {";
-      assert.ok(source.includes(declaration));
-      await route.fulfill({
-        response,
-        body: source.replace(
-          declaration,
-          declaration +
-            "\n(window.tokenizations ??= []).push({code, language});",
-        ),
+  const ctx = await editorPage(t, {
+    beforeLoad: async (page) => {
+      await page.route("**/tokenizer.js", async (route) => {
+        const response = await route.fetch();
+        const source = await response.text();
+        const declaration =
+          "export function tokenize(code, language, parse = parseSyntax) {";
+        assert.ok(source.includes(declaration));
+        await route.fulfill({
+          response,
+          body: source.replace(
+            declaration,
+            declaration +
+              "\n(window.tokenizations ??= []).push({code, language});",
+          ),
+        });
       });
-    });
+    },
   });
   if (!ctx) return;
   const { page, errors } = ctx;
@@ -353,6 +377,9 @@ test("caret and focus changes reuse ranges until code or language changes", asyn
       editor.focus();
     });
     await page.keyboard.press("ControlOrMeta+A");
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 0,
+    );
     await page.evaluate(() => {
       window.overlayPaints = 0;
     });
@@ -424,11 +451,13 @@ test("a loaded grammar replaces cached fallback ranges without an edit", async (
   const grammarReady = new Promise((resolve) => {
     releaseGrammar = resolve;
   });
-  const ctx = await editorPage(t, async (page) => {
-    await page.route("**/tree-sitter-javascript.wasm", async (route) => {
-      await grammarReady;
-      await route.continue();
-    });
+  const ctx = await editorPage(t, {
+    beforeLoad: async (page) => {
+      await page.route("**/tree-sitter-javascript.wasm", async (route) => {
+        await grammarReady;
+        await route.continue();
+      });
+    },
   });
   if (!ctx) return;
   const { page, errors } = ctx;
@@ -456,5 +485,262 @@ test("a loaded grammar replaces cached fallback ranges without an edit", async (
   } finally {
     releaseGrammar();
     await page.close();
+  }
+});
+
+test("disabled auto indentation uses native Enter and retains manual indentation", async (t) => {
+  const ctx = await editorPage(t, { params: { editorAutoIndent: "0" } });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    const code = "    if ready:";
+    await setCode(page, code);
+    await page.keyboard.press("Enter");
+    assert.deepEqual(await caretState(page), {
+      value: `${code}\n`,
+      start: code.length + 1,
+      end: code.length + 1,
+    });
+    await page.waitForFunction(
+      () => document.querySelector("#editor-lines").textContent === "1\n2",
+    );
+    assert.equal(await page.locator("#editor-lines").textContent(), "1\n2");
+    assert.ok(await page.locator("#editor-highlight .tok-keyword").count());
+    await page.keyboard.press("ControlOrMeta+Z");
+    assert.equal((await caretState(page)).value, code);
+    await page.keyboard.press("ControlOrMeta+Shift+Z");
+    assert.equal((await caretState(page)).value, `${code}\n`);
+    await page.keyboard.press("Tab");
+    assert.equal((await caretState(page)).value, `${code}\n    `);
+    await page.keyboard.press("Shift+Tab");
+    assert.equal((await caretState(page)).value, `${code}\n`);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await page
+        .locator("#editor")
+        .evaluate((editor) => document.activeElement === editor),
+      false,
+    );
+    await setCode(page, "aREMOVEb", 1, 7);
+    await page.keyboard.press("Enter");
+    assert.deepEqual(await caretState(page), {
+      value: "a\nb",
+      start: 2,
+      end: 2,
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("disabled auto indentation retains parsed bracket highlighting", async (t) => {
+  const ctx = await editorPage(t, { params: { editorAutoIndent: "0" } });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await page.evaluate(() =>
+      document.querySelector('[data-language="javascript"]').click(),
+    );
+    await page.waitForFunction(async () => {
+      const { parseSyntax } = await import("/syntax-parser.js");
+      const tree = parseSyntax("", "javascript");
+      tree?.delete();
+      return tree !== null;
+    });
+    const code = "function f() {} /[()]/.test(value);";
+    const caret = code.indexOf("[()") + 1;
+    await setCode(page, code, caret);
+    assert.equal(await page.locator(".matching-bracket").count(), 0);
+    assert.deepEqual(await caretState(page), {
+      value: code,
+      start: caret,
+      end: caret,
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("disabled bracket auto-close leaves insertion and deletion to the browser", async (t) => {
+  const ctx = await editorPage(t, { params: { editorAutoClose: "0" } });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    for (const [value, start, end, key, expected, caret] of [
+      ["", 0, 0, "(", "(", 1],
+      ["text", 0, 4, "[", "[", 1],
+      ["()", 1, 1, ")", "())", 2],
+      ["{}", 1, 1, "Backspace", "}", 0],
+    ]) {
+      await setCode(page, value, start, end);
+      await page.keyboard.press(key);
+      assert.deepEqual(
+        await caretState(page),
+        {
+          value: expected,
+          start: caret,
+          end: caret,
+        },
+        key,
+      );
+    }
+    await setCode(page, "if ready:");
+    await page.keyboard.press("Enter");
+    assert.equal((await caretState(page)).value, "if ready:\n    ");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("disabled highlighting and indentation invoke neither classifier nor parser", async (t) => {
+  const ctx = await editorPage(t, {
+    params: { editorHighlight: "0", editorAutoIndent: "0" },
+    beforeLoad: async (page) => {
+      for (const [module, name] of [
+        ["highlight", "highlight"],
+        ["tokenizer", "tokenize"],
+      ])
+        await page.route(`**/${module}.js`, (route) =>
+          route.fulfill({
+            contentType: "text/javascript",
+            body: `export function ${name}() { throw new Error("Disabled classifier called"); }`,
+          }),
+        );
+    },
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    assert.equal(await page.locator("#editor-highlight").isVisible(), false);
+    const color = await page
+      .locator("#editor")
+      .evaluate((editor) => getComputedStyle(editor).color);
+    assert.notEqual(color, "rgba(0, 0, 0, 0)");
+    assert.equal(await page.locator("#editor-highlight code").innerHTML(), "");
+    await page.keyboard.type("(");
+    assert.equal((await caretState(page)).value, "()");
+    await setCode(page, "    if ready:");
+    await page.keyboard.press("Enter");
+    const python = (await caretState(page)).value;
+    assert.equal(python, "    if ready:\n");
+    await page.evaluate(() =>
+      document.querySelector('[data-language="javascript"]').click(),
+    );
+    await setCode(page, "if (ready) {");
+    await page.keyboard.press("Enter");
+    assert.equal((await caretState(page)).value, "if (ready) {\n");
+    await page.evaluate(() =>
+      document.querySelector('[data-language="python"]').click(),
+    );
+    assert.equal((await caretState(page)).value, python);
+    assert.equal(await page.locator("#editor-lines").textContent(), "1\n2");
+    assert.deepEqual(ctx.parserRequests, []);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("disabled highlighting retains syntax-aware Enter", async (t) => {
+  const ctx = await editorPage(t, { params: { editorHighlight: "0" } });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await setCode(page, "    if ready:");
+    await page.keyboard.press("Enter");
+    assert.equal((await caretState(page)).value, "    if ready:\n        ");
+    assert.equal(await page.locator("#editor-highlight").isVisible(), false);
+    assert.equal(await page.locator("#editor-highlight code").innerHTML(), "");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("plain editor text follows the highlight layer's color setting", async (t) => {
+  const ctx = await editorPage(t, {
+    params: { editorHighlight: "0" },
+    beforeLoad: (page) => page.emulateMedia({ colorScheme: "dark" }),
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    const textColors = () =>
+      page.evaluate(() =>
+        ["#editor", "#editor-highlight"].map(
+          (selector) =>
+            getComputedStyle(document.querySelector(selector)).color,
+        ),
+      );
+    assert.deepEqual(await textColors(), [
+      "rgb(212, 212, 212)",
+      "rgb(212, 212, 212)",
+    ]);
+    await page.evaluate(() =>
+      document.querySelector("#editor-theme-toggle").click(),
+    );
+    assert.deepEqual(await textColors(), [
+      "rgb(31, 31, 31)",
+      "rgb(31, 31, 31)",
+    ]);
+    await page.evaluate(() =>
+      document.querySelector("#editor-theme-toggle").click(),
+    );
+    assert.deepEqual(await textColors(), [
+      "rgb(212, 212, 212)",
+      "rgb(212, 212, 212)",
+    ]);
+    const colors = await page.evaluate(() => {
+      document
+        .querySelector(".editor-stack")
+        .style.setProperty("--code-text", "#1f1f1f");
+      return ["#editor", "#editor-highlight"].map(
+        (selector) => getComputedStyle(document.querySelector(selector)).color,
+      );
+    });
+    assert.deepEqual(colors, ["rgb(31, 31, 31)", "rgb(31, 31, 31)"]);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a proportional font keeps the textarea and highlight metrics aligned", async (t) => {
+  for (const editorHighlight of ["0", "1"]) {
+    const ctx = await editorPage(t, {
+      params: { editorMonospace: "0", editorHighlight },
+    });
+    if (!ctx) return;
+    const { page, errors } = ctx;
+    try {
+      await page.evaluate(() =>
+        document.querySelector("#editor-font-larger").click(),
+      );
+      const [editor, overlay] = await page.evaluate(() =>
+        ["#editor", "#editor-highlight code"].map((selector) => {
+          const style = getComputedStyle(document.querySelector(selector));
+          return {
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+            lineHeight: style.lineHeight,
+            tabSize: style.tabSize,
+          };
+        }),
+      );
+      const bodyFont = await page.evaluate(
+        () => getComputedStyle(document.body).fontFamily,
+      );
+      assert.equal(editor.fontFamily, bodyFont);
+      assert.deepEqual(overlay, editor);
+      await setCode(page, "a\nb");
+      assert.equal(await page.locator("#editor-lines").textContent(), "1\n2");
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
   }
 });

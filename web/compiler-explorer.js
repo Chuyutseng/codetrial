@@ -122,8 +122,12 @@ export const compiledTestsEnabled = () =>
 /// C has no classes, so `generateHarness` refuses a class judge for it and a
 /// candidate would otherwise find that out by writing a whole solution and
 /// pressing run.
-export function harnessGap(language, spec) {
-  if (!compiledTestsEnabled() && COMPILED_LANGUAGES.includes(language)) {
+export function harnessGap(language, spec, execution = true) {
+  if (
+    execution &&
+    !compiledTestsEnabled() &&
+    COMPILED_LANGUAGES.includes(language)
+  ) {
     return "Compiled language tests are disabled by this server. Choose Python or JavaScript to run tests.";
   }
   if (language === "c" && !spec) {
@@ -137,8 +141,10 @@ export function harnessGap(language, spec) {
 
 /// Withhold C until the judge proves it is function-style, so a slow fetch
 /// cannot let a candidate start a class problem in an untestable language.
-export function languagesFor(spec) {
-  return ALL_LANGUAGES.filter((language) => !harnessGap(language, spec));
+export function languagesFor(spec, execution = true) {
+  return ALL_LANGUAGES.filter(
+    (language) => !harnessGap(language, spec, execution),
+  );
 }
 
 export function generateHarness(language, spec, candidateCode) {

@@ -1014,6 +1014,11 @@ fn report_with_integrity_events(
             "interviewLoop".to_string(),
             serde_json::json!(state.interview_loop.as_str()),
         );
+        if state.code_execution_disabled {
+            object.insert("codeExecution".to_string(), serde_json::Value::Bool(false));
+        } else {
+            object.remove("codeExecution");
+        }
 
         // Which surface it was held on, beside the loop it was held in. The
         // card and the export both say it, and the saved report is the only
@@ -1060,16 +1065,19 @@ fn report_prompt_text(
     // Passed apart from the rolling assessment, which the report prompt wraps
     // as untrusted material; the prompt owns the ledger's heading and its
     // place.
-    let evidence = if state.evidence_ledger.entries.is_empty() {
+    let evidence = if state.evidence_ledger.entries.is_empty() && !state.code_execution_disabled {
         String::new()
     } else {
         state
-            .evidence_ledger
-            .prompt_view(crate::agent::ViewFor::Report)
+            .prompt_evidence(crate::agent::ViewFor::Report)
             .join("\n")
     };
     let transcript = transcript_for_report(&crate::agent::report_transcript_lines(state));
-    let test_summary = format_test_run(state.last_test_run.as_ref(), state.test_runs);
+    let test_summary = if state.code_execution_disabled {
+        "Code execution was disabled by the candidate; testing evidence is the candidate's hand trace of written code, not executed cases.".to_string()
+    } else {
+        format_test_run(state.last_test_run.as_ref(), state.test_runs)
+    };
     report_prompt(ReportPromptInput {
         problem: boot.problem,
         interview_mode: boot.interview_mode,

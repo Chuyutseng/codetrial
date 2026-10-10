@@ -22,11 +22,21 @@ const COMPRESSION_OPENING_BYTES: usize = 750;
 const COMPRESSION_TEST_REPORT_BYTES: usize = 1_000;
 const COMPRESSION_EDITOR_BYTES: usize = 1_800;
 
-fn reacto_policy(mode: InterviewMode) -> &'static str {
+fn reacto_policy(mode: InterviewMode, code_execution_disabled: bool) -> String {
     if mode.is_whiteboard() {
-        return whiteboard_reacto_policy();
+        return whiteboard_reacto_policy().to_string();
     }
-    r#"REACTO CODING FLOW — the spine of this interview. Infer the current step from the whole conversation and the latest editor/test
+    let test_policy = if code_execution_disabled {
+        "5. Test — code execution is disabled for this interview. Ask the candidate to\n   trace their written code on one ordinary case and one boundary case, stating\n   expected results. Record Test from that trace with source `candidate_speech`;\n   never ask them to click Run or claim that cases executed."
+    } else {
+        r#"5. Test — ask them to predict useful cases and expected results before or alongside
+   clicking Run. A verbal trace alone does not complete Test: wait for a test
+   event with executed cases of the code now in the editor, then discuss the
+   results. Setup errors and empty runs do not count; failing cases do count as
+   testing. Browser results are the candidate's claim, never proof."#
+    };
+    format!(
+        r#"REACTO CODING FLOW — the spine of this interview. Infer the current step from the whole conversation and the latest editor/test
 event. Name the step you are moving to in a few words when you move, so the
 candidate always knows where they are, and remind them once if they skip one or
 stall inside one. Do not narrate the acronym continuously, do not announce a step
@@ -41,11 +51,7 @@ they are already doing, and never say how any step will be scored:
    Any sound approach is valid; it need not match the private optimal approach.
 4. Coding — make a one-sentence transition to implementation, then stay quiet while
    they are productive. Ask about a completed block, not syntax they are typing.
-5. Test — ask them to predict useful cases and expected results before or alongside
-   clicking Run. A verbal trace alone does not complete Test: wait for a test
-   event with executed cases of the code now in the editor, then discuss the
-   results. Setup errors and empty runs do not count; failing cases do count as
-   testing. Browser results are the candidate's claim, never proof.
+{test_policy}
 6. Optimizations — after a testable solution, ask them to confirm complexity,
    identify an uncovered edge case, and name one useful optimization or cleanup.
    "Already optimal" is valid when they justify it.
@@ -76,6 +82,7 @@ such as "What case would you test?" is interviewing. Anything that names or
 rules out an algorithm, data structure, invariant, or bug location is a hint:
 give one only as flow 5 says, and after any other you realise you gave,
 call `log_hint` with `requested` false."#
+    )
 }
 
 /// Every prompt that has to honour a declined behavioral probe names it in
@@ -348,12 +355,16 @@ fn numbered_list(items: &[&str]) -> String {
 pub fn build_instructions_for_plan(
     problem: &Problem,
     duration_min: u32,
-    profile: &InterviewProfile,
-    grounding: &InterviewGrounding,
-    interview_loop: InterviewLoop,
-    examples_hidden: bool,
-    interview_mode: InterviewMode,
+    options: &crate::runtime::RuntimeOptions,
 ) -> String {
+    let &crate::runtime::RuntimeOptions {
+        ref profile,
+        ref grounding,
+        interview_loop,
+        examples_hidden,
+        interview_mode,
+        code_execution_disabled,
+    } = options;
     let metadata = problem.question_metadata();
     let [_, optimal_point, pitfalls_point] = metadata.expected_discussion_points;
     let competencies = metadata.competencies.join(", ");
@@ -462,8 +473,26 @@ policies, which come out of the conversation as they would with a person."
         evidence_work_note,
         unclear_speech_note,
     } = Surface::for_mode(interview_mode);
+    let (run_note, evidence_sources_note, evidence_work_note) =
+        if code_execution_disabled && !interview_mode.is_whiteboard() {
+            (
+                "- Code execution is disabled, so no test-run result can arrive. Ask the
+  candidate to trace their written code; expected outputs are their reasoning,
+  not executed results. Judge correctness from the code itself.",
+                "only after candidate speech or an editor snapshot supports one REACTO/STAR
+  phase.",
+                "  Coding, Test and Optimizations concern code the candidate has written, as last
+  shown to you; a described plan is Algorithm, and the call is refused while the
+  editor holds only the starter. Code execution is disabled for this interview.
+  Record Test with source `candidate_speech` only after the candidate traces
+  their written code through ordinary and boundary cases with expected results.
+  Do not ask for a run or record a test_event.",
+            )
+        } else {
+            (run_note, evidence_sources_note, evidence_work_note)
+        };
     let policies = [
-        reacto_policy(interview_mode).to_string(),
+        reacto_policy(interview_mode, code_execution_disabled),
         star_round_policy,
         disclosure_policy.to_string(),
         profile_policy(profile),
@@ -845,9 +874,8 @@ const OWED_REPLY: &str = "Your reply to the candidate's latest turn or the lates
 /// rows are the interviewer's own bookkeeping, and a step the candidate
 /// covered but the model never recorded is still covered.
 ///
-/// Complexity and edge cases only: Test is recorded from a run of the code on
-/// screen, which the test reactions say, and asking the model to record it
-/// from the conversation would invite a record the gate refuses.
+/// Complexity and edge cases only: Test follows the separate run or hand-trace
+/// policy, rather than treating any mention of testing as completion.
 const RECORD_UNRECORDED: &str = "If the conversation shows they already covered complexity or edge cases, record that evidence silently instead of asking them to repeat it.";
 
 /// How a credited test run's code compares, by the server on the code the
@@ -877,6 +905,8 @@ fn code_since_latest_run(state: &RuntimeState) -> Option<bool> {
         .map(|_| super::tested_code_is_current(state))
 }
 
+const DISABLED_EXECUTION_POLICY: &str = "Code execution is disabled for this interview. Verify written code with hand traces, without asking for a run or claiming tests executed.";
+
 const CODING_ONLY_ENDING: &str = "A coding-only interview ends when the platform timer expires or the candidate chooses End, even when all REACTO steps have evidence and all tests pass. Do not say goodbye or ask them to end the session.";
 
 /// The outcome of the credited run when the editor still holds exactly the code
@@ -899,6 +929,11 @@ fn coding_only_continuation(state: &RuntimeState) -> String {
         };
         return format!(
             "{CODING_ONLY_ENDING} Nothing runs at a whiteboard, so do not ask for a run; {offer} trade-offs or cases not yet covered, without starting a second task."
+        );
+    }
+    if state.code_execution_disabled {
+        return format!(
+            "{CODING_ONLY_ENDING} {DISABLED_EXECUTION_POLICY} Do not repeat traces or questions already covered; discuss only unresolved concerns."
         );
     }
     let current = code_since_latest_run(state);
@@ -949,6 +984,21 @@ fn coding_only_continuation(state: &RuntimeState) -> String {
 /// cannot see the code the run tested, and that covered work is recorded
 /// rather than asked for again.
 fn coding_progress(state: &RuntimeState) -> Option<String> {
+    if state.code_execution_disabled
+        && !state.interview_mode.is_whiteboard()
+        && !super::coding_continues_past_gate(state)
+    {
+        let next = if super::coding_round_complete(state) {
+            "Test and Optimizations have evidence; do not repeat completed traces, complexity or edge-case questions."
+        } else if super::phases_evidenced(state, &[super::FrameworkPhase::Test]) {
+            "Test has evidence from a hand trace; ask only for steps they have not covered."
+        } else {
+            "When written code is ready, ask for one ordinary and one boundary case with expected results; record Test from that trace with source `candidate_speech`."
+        };
+        return Some(format!(
+            "{DISABLED_EXECUTION_POLICY} {next} {RECORD_UNRECORDED}"
+        ));
+    }
     if super::coding_continues_past_gate(state) {
         return Some(format!(
             "Test and Optimizations have evidence; that records work attempted, not a passing solution. {}",
@@ -1647,6 +1697,9 @@ pub fn time_warning(state: &RuntimeState) -> String {
             && source != super::TestSource::Run
         {
             steps.push(match source {
+                super::TestSource::Trace if state.code_execution_disabled => {
+                    "trace the highest-value cases by hand, since code execution is disabled for this interview"
+                }
                 super::TestSource::Trace => {
                     "trace the highest-value cases by hand, since the runner cannot provide tests for this language"
                 }
@@ -1816,6 +1869,9 @@ fn unfinished_coding_refusal(state: &RuntimeState) -> String {
         "Test and Optimizations"
     };
     let way_to_test = match super::test_source(state) {
+        super::TestSource::Trace if state.code_execution_disabled => {
+            "Code execution is disabled for this interview, so ask the candidate to trace their written code by hand and record Test from that trace"
+        }
         super::TestSource::Trace => {
             "The runner cannot provide tests for this language, so ask the candidate to trace their code by hand and record Test from that trace"
         }
@@ -2610,6 +2666,9 @@ are not calibrated for hiring use. Never mechanically derive either top-level
 score or the hiring decision from them; apply the evidence-based rules above.
 
 Grounding rules — a real debrief cites evidence:
+- When session metadata says code execution was disabled, assess testing from
+  the candidate's hand traces. Do not invent executed cases or passing results,
+  or penalize the absence of a run alone; still judge the code and reasoning.
 - Every claim must point at something {cited_in}, the transcript, or the
   rolling assessment in the brief. If all three are thin, say the session was
   too quiet to judge rather than inferring intent the candidate never voiced.

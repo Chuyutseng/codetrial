@@ -46,7 +46,10 @@ after(async () => {
 /// whether the interview has begun. `media` opens the page in a browser with a
 /// fake microphone and camera instead, for a case that clears the preflight
 /// for real.
-async function interviewPage(t, { started = true, media = false } = {}) {
+async function interviewPage(
+  t,
+  { started = true, media = false, params = {} } = {},
+) {
   if (!browser) {
     t.skip("playwright chromium unavailable");
     return null;
@@ -54,9 +57,21 @@ async function interviewPage(t, { started = true, media = false } = {}) {
   const page = await (media ? await mediaBrowser(t) : browser).newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+  const query = new URLSearchParams({
+    problem: "chargeback-pair-match",
+    ...params,
+  });
+  await page.goto(`${base}/interview.html?${query}`, {
     waitUntil: "domcontentloaded",
   });
+  if (params.mode === "whiteboard") {
+    await page.locator("#board-panel").waitFor({ state: "visible" });
+    if (started)
+      await page.evaluate(() => {
+        document.querySelector("#audio-check").hidden = true;
+      });
+    return { page, errors };
+  }
   // The placeholder is set from inside bindEvents, after the shortcut is
   // registered. Waiting on the editor would not do: it carries no disabled
   // attribute, so it looks ready before any listener exists, and a test that
@@ -86,6 +101,147 @@ async function interviewPage(t, { started = true, media = false } = {}) {
 const runs = (page) => page.evaluate(() => globalThis.runs);
 const enterDefaultPrevented = (page) =>
   page.evaluate(() => globalThis.enterDefaultPrevented);
+
+test("disabled execution blocks button and shortcut runs across language switches", async (t) => {
+  const ctx = await interviewPage(t, { params: { editorExecution: "0" } });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    assert.match(
+      await page.locator(".compile-disclosure").textContent(),
+      /execution is disabled/,
+    );
+    assert.equal(await page.locator("#run-tests").isVisible(), false);
+    assert.equal(await page.locator("#candidate-case").isVisible(), false);
+    assert.equal(await page.locator("#results-toggle").isVisible(), false);
+    for (const language of ["python", "javascript", "c", "cpp", "java"]) {
+      const button = page.locator(`[data-language="${language}"]`);
+      assert.equal(await button.isDisabled(), false, language);
+      await button.evaluate((button) => button.click());
+      assert.equal(
+        await page.locator("#run-tests").isDisabled(),
+        true,
+        language,
+      );
+      await page.locator("#editor").focus();
+      for (const chord of ["Meta+Enter", "Control+Enter"]) {
+        const before = await page.locator("#editor").inputValue();
+        await page.keyboard.press(chord);
+        assert.equal(await enterDefaultPrevented(page), true, chord);
+        assert.equal(await page.locator("#editor").inputValue(), before, chord);
+      }
+      await page.locator("#run-tests").evaluate((button) => {
+        button.disabled = false;
+        button.click();
+      });
+      assert.equal(
+        await runs(page),
+        0,
+        `the execution entry point must reject ${language}`,
+      );
+    }
+    await page.locator("#end").focus();
+    for (const chord of ["Meta+Enter", "Control+Enter"]) {
+      await page.keyboard.press(chord);
+      assert.equal(await enterDefaultPrevented(page), true, chord);
+      assert.equal(await page.locator("#end").isDisabled(), false);
+      assert.equal(await page.locator("#report-modal").isVisible(), false);
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("disabled execution keeps C unavailable for class problems", async (t) => {
+  const ctx = await interviewPage(t, {
+    params: { problem: "bounded-event-queue", editorExecution: "0" },
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    const c = page.locator('[data-language="c"]');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-language="c"]').title.includes("class"),
+    );
+    assert.equal(await c.isDisabled(), true);
+    const before = await page.locator("#editor").inputValue();
+    await c.evaluate((button) => button.click());
+    assert.equal(await page.locator("#editor").inputValue(), before);
+    for (const language of ["python", "javascript", "cpp", "java"]) {
+      const button = page.locator(`[data-language="${language}"]`);
+      assert.equal(await button.isDisabled(), false, language);
+      await button.click();
+      const code = await page.locator("#editor").inputValue();
+      assert.notEqual(code, "undefined", language);
+      assert.ok(code.trim(), language);
+    }
+    assert.equal(await runs(page), 0);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("offline reports apply execution preferences only to editor interviews", async (t) => {
+  for (const mode of ["coding", "whiteboard"]) {
+    const ctx = await interviewPage(t, {
+      params: { mode, editorExecution: "0" },
+    });
+    if (!ctx) return;
+    const { page, errors } = ctx;
+    try {
+      await page.evaluate(() => document.querySelector("#end").click());
+      await page.locator("#report-modal").waitFor({ state: "visible" });
+      const report = await page.evaluate(async () => {
+        const { readLocalHistory } = await import("/history.js");
+        return readLocalHistory()[0].report;
+      });
+      assert.equal(report.codeExecution === false, mode === "coding");
+      assert.equal(
+        (await page.locator("#report-modal").textContent()).includes(
+          "Code execution was disabled for this interview.",
+        ),
+        mode === "coding",
+      );
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  }
+});
+
+test("a disabled-execution interview sends its choice with the token request", async (t) => {
+  const ctx = await interviewPage(t, {
+    started: false,
+    media: true,
+    params: { editorExecution: "0" },
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await page.route("**/api/token", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Offline test" }),
+      }),
+    );
+    const token = page.waitForRequest(
+      (request) => new URL(request.url()).pathname === "/api/token",
+    );
+    await clearPreflight(page);
+    assert.equal((await token).postDataJSON().codeExecution, false);
+    assert.equal(await page.locator("#run-tests").isDisabled(), true);
+    assert.equal(await page.locator("#run-tests").isVisible(), false);
+    assert.equal(await page.locator(".test-drawer").isVisible(), false);
+    await page.keyboard.press("ControlOrMeta+Enter");
+    assert.equal(await runs(page), 0);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
 
 /// Waits until Run tests is enabled. The disabled button refuses a press while
 /// a run is going or while the interview is paused, so a test that expects a

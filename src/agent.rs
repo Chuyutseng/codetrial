@@ -171,9 +171,9 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 30;
-pub const LIVE_PROMPT_VERSION: u32 = 22;
-pub const REPORT_PROMPT_VERSION: u32 = 17;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 31;
+pub const LIVE_PROMPT_VERSION: u32 = 23;
+pub const REPORT_PROMPT_VERSION: u32 = 18;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
 
@@ -767,6 +767,7 @@ pub struct RuntimeState {
     /// `last_test_run` and `test_runs` below stay at their defaults for its
     /// whole life, and every gate that reads them has to ask this first.
     pub interview_mode: InterviewMode,
+    pub code_execution_disabled: bool,
     pub coding_minutes: u32,
     pub behavioral_minutes: u32,
     pub round_transition_seen: bool,
@@ -994,6 +995,14 @@ impl RuntimeState {
         }
     }
 
+    pub(crate) fn prompt_evidence(&self, purpose: ViewFor) -> Vec<String> {
+        let mut lines = self.evidence_ledger.prompt_view(purpose);
+        if self.code_execution_disabled {
+            lines.push("Code execution: disabled by the candidate for this interview; testing evidence comes from hand traces, not executed cases.".to_string());
+        }
+        lines
+    }
+
     /// A fresh interview of this problem: its hint ladder and its starters,
     /// which nothing the browser sends may replace. Built here rather than by
     /// whoever starts a room, because a state missing either answers every hint
@@ -1024,6 +1033,7 @@ impl Default for RuntimeState {
             started_at: std::time::Instant::now(),
             interview_loop: InterviewLoop::CodingBehavioral,
             interview_mode: InterviewMode::Coding,
+            code_execution_disabled: false,
             coding_minutes: 37,
             behavioral_minutes: 8,
             round_transition_seen: false,
@@ -1764,6 +1774,8 @@ pub(crate) enum TestSource {
 pub(crate) fn test_source(state: &RuntimeState) -> TestSource {
     if state.interview_mode.is_whiteboard() {
         TestSource::Board
+    } else if state.code_execution_disabled {
+        TestSource::Trace
     } else if tested_code_is_current(state) {
         TestSource::Run
     } else if runner_unavailable_on_screen(state) {
@@ -2240,12 +2252,12 @@ fn record_evidence(
     // implementation. Test is the run's evidence, so it is recorded from the
     // test event, and only while the editor still holds the code that run
     // executed. This also covers model-inferred completion and a model claiming
-    // a test_event the server never received. The one exception is a platform
-    // that cannot run tests at all, where the candidate's hand trace is the
-    // only testing left, and it is recorded as what it is: speech. That outage
-    // is the browser's claim, as its pass counts are; a Test row from
-    // `candidate_speech` exists only on this path, so the report shows a reader
-    // which interviews took it. A run of the code on screen still wins over an
+    // a test_event the server never received. When execution is disabled or a
+    // platform cannot run tests, the candidate's hand trace is the only testing
+    // left, and it is recorded as what it is: speech. That outage is the
+    // browser's claim, as its pass counts are; a Test row from
+    // `candidate_speech` identifies tracing, while the session setting tells it
+    // apart from an outage. A run of the code on screen still wins over an
     // outage reported after it.
     if phase == FrameworkPhase::Test && kind != EvidenceKind::Skipped {
         match test_source(state) {
@@ -2253,9 +2265,11 @@ fn record_evidence(
                 return Err("record Test with source test_event: it is the run's evidence");
             }
             TestSource::Trace if source != EvidenceSource::CandidateSpeech => {
-                return Err(
-                    "the runner cannot provide tests, so Test is recorded from the candidate's hand trace, with source candidate_speech",
-                );
+                return Err(if state.code_execution_disabled {
+                    "code execution is disabled, so record Test from a hand trace with source candidate_speech"
+                } else {
+                    "the runner cannot provide tests, so Test is recorded from the candidate's hand trace, with source candidate_speech"
+                });
             }
             TestSource::Neither => {
                 return Err(
@@ -2589,6 +2603,7 @@ pub struct MetadataConfig {
     pub grounding: InterviewGrounding,
     /// The candidate hid the worked examples in the preflight.
     pub examples_hidden: bool,
+    pub code_execution_disabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -2899,6 +2914,8 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
     let profile = sanitize_interview_profile(value.get("interviewProfile"));
     let grounding = sanitize_interview_grounding(value.get("interviewGrounding"));
     let examples_hidden = value.get("hideExamples") == Some(&serde_json::Value::Bool(true));
+    let code_execution_disabled =
+        value.get("codeExecution") == Some(&serde_json::Value::Bool(false));
 
     MetadataConfig {
         problem,
@@ -2908,6 +2925,7 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
         profile,
         grounding,
         examples_hidden,
+        code_execution_disabled,
     }
 }
 
